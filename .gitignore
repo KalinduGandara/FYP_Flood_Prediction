@@ -1,0 +1,6 @@
+.venv
+/data
+/outputs
+/__pycache__
+/map_model
+test*

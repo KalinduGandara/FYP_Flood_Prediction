@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flood Map Visualization</title>
+    <style>
+        #map-container {
+            position: relative;
+            width: 800px;
+            /* Adjust as needed */
+            height: 600px;
+            /* Adjust as needed */
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+        }
+
+        #map-label {
+            position: absolute;
+            top: 0;
+            left: 0;
+            padding: 5px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 5px;
+            font-size: 12px;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map-container">
+        <canvas id="flood-map" width="800" height="600"></canvas>
+        <div id="map-label"></div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            let canvas = document.getElementById('flood-map');
+            let ctx = canvas.getContext('2d');
+            let mapLabel = $('#map-label');
+
+            function getColorForHeight(height, maxHeight) {
+                return 'rgba(0, 0, 255, ' + (height / maxHeight) + ')';
+            }
+            function drawFloodMap(floodMap, maxHeight) {
+                for (let y = 0; y < floodMap.length; y++) {
+                    for (let x = 0; x < floodMap[y].length; x++) {
+                        let height = floodMap[y][x];
+                        let color = getColorForHeight(height, maxHeight);
+                        ctx.fillStyle = color;
+                        ctx.fillRect(x, y, 1, 1);
+                    }
+                }
+
+                // Show flood height label on cursor hover
+                canvas.addEventListener('mousemove', function (event) {
+                    let rect = canvas.getBoundingClientRect();
+                    let mouseX = event.clientX - rect.left;
+                    let mouseY = event.clientY - rect.top;
+
+                    let pixelData = ctx.getImageData(mouseX, mouseY, 1, 1).data;
+                    let floodHeight = pixelData[3]; // Assuming flood height is stored in the red channel
+                    // console.log(floodHeight, pixelData);
+                    mapLabel.text('Flood Height: ' + floodHeight + ' centimeters');
+                    mapLabel.css({ top: mouseY + 'px', left: mouseX + 'px' });
+                    mapLabel.show();
+                });
+
+                canvas.addEventListener('mouseleave', function () {
+                    mapLabel.hide();
+                });
+            }
+
+            fetch('http://localhost:8000/')
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data);
+                    floodMap = data.image;
+                    maxHeight = data.max_height;
+                    drawFloodMap(floodMap, maxHeight);
+                });
+
+        });
+
+
+    </script>
+</body>
+
+</html>
