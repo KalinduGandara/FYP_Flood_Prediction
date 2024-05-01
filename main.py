@@ -128,7 +128,6 @@ def get_image():
 @app.post("/predict/")
 async def predict(request: Request, input_data: dict = Body(...)):
     # Create a DataFrame with user input
-    # Create a DataFrame with user input
     input_df = pd.DataFrame({
         'Building Age': input_data['Building Age'],
         'Estimated value bins': bin_estimated_value(input_data['Estimated value']),
@@ -160,6 +159,10 @@ async def predict(request: Request, input_data: dict = Body(...)):
     lat, lon = input_data['lat'], input_data['lon']
     cordx, cordy = latlon_to_polar.transform(lat, lon)
     x, y = transformer.rowcol(cordx, cordy)
+
+    # send bad request if the location is out of bounds
+    if x < 0 or y < 0 or x >= flood_map.shape[0] or y >= flood_map.shape[1]:
+        return Response(content="Location out of bounds", media_type="text/plain", status_code=400)
     flood_height = flood_map[x, y]
 
     # Create a DataFrame with user input
