@@ -16,11 +16,14 @@ import pyproj
 
 
 def load_model(name):
+    # Loading the model weights
     from tensorflow.keras.models import model_from_json
 
+    # Model reconstruction from JSON file
     with open(name+'.json', 'r') as f:
         model = model_from_json(f.read())
 
+    # Load weights into the new model
     model.load_weights(name+'.h5')
 
     return model
@@ -40,9 +43,8 @@ categorical_cols = ['Walls', 'Roof', 'Pillars']
 model_name = "map_model/CNN_Model_2005"
 # model = load_model(model_name)
 model = None
-
-damage_model = joblib.load('model/xg_model.joblib')
-damage_encoder = joblib.load('model/encoder.joblib')
+damage_model = joblib.load('model\xg_model.joblib')
+damage_encoder = joblib.load('model\encoder.joblib')
 with open('map_model/transformer.pkl', 'rb') as f:
     transformer = pickle.load(f)
 source_crs = 'epsg:4326'  # Global lat-lon coordinate system
@@ -61,6 +63,7 @@ def get_pred():
     x_test = x_test.reshape(1, 1, 28)
 
     y_pred = model.predict(x_test)
+    # y_pred.resize(611, 951)
     y_pred.resize(600, 900)
     y_pred[y_pred < 0.15] = 0
 
@@ -74,6 +77,18 @@ def get_pred2():
         img_data = real_data.read(1)
 
         return img_data
+
+
+def get_pred_rand():
+    x_test = np.random.rand(28)
+    x_test = x_test.reshape(1, 1, 28)
+
+    # y_pred = model.predict(x_test)
+    # y_pred.resize(611, 951)
+    # y_pred[y_pred < 0.2] = 0
+    y_pred = np.random.rand(900, 500)
+
+    return y_pred
 
 
 def bin_estimated_value(estimated_value):
@@ -94,17 +109,27 @@ def get_estimated_value_range(value):
 
 
 def bin_flood_height(height):
-    height_bins = [-float('inf'), 1, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225,
+    height_bins = [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225,
                    240, 255, 270, 285, 300, 315, 330, 345, 360, 375, 390, 405, 420, 435, float('inf')]
     return pd.cut([height], bins=height_bins).codes[0]
 
 
 @app.get("/")
 def read_root():
-    # image = get_pred()
+    # y_pred = get_pred()
     image = get_pred2()
+    image[image < 0] = 0
+    print(image.shape)
 
-    return {"image": image.tolist(), "max_height": int(image.max())}
+    new_shape = (500, 500)
+
+    # Resize the image using bilinear interpolation (recommended for scaling down)
+    resized_image = ndimage.zoom(image, zoom=(new_shape[0] / image.shape[0],
+                                              new_shape[1] / image.shape[1]),
+                                 mode='reflect')
+    print(resized_image.shape)
+    # return {"image": [[1, 2, 3], [1, 2, 3]]}
+    return {"image": resized_image.tolist(), "max_height": int(resized_image.max())}
 
 
 @app.get("/image", response_class=Response)
@@ -125,9 +150,29 @@ def get_image():
     return Response(content=image_bytes, media_type="image/jpeg")
 
 
+@app.get("/image2", response_class=Response)
+def get_image2():
+    filename = 'data/Run2-0073.wd'
+
+    with rio.open(filename) as real_data:
+        img_data = real_data.read(1)
+
+        fig, ax = plt.subplots()
+        ax.imshow(img_data)
+        ax.axis('off')
+        plt.tight_layout()
+
+        buffer = BytesIO()
+        plt.savefig(buffer, format='jpeg')
+        plt.close(fig)
+
+        image_bytes = buffer.getvalue()
+
+        return Response(content=image_bytes, media_type="image/jpeg")
+
+
 @app.post("/predict/")
 async def predict(request: Request, input_data: dict = Body(...)):
-    # Create a DataFrame with user input
     # Create a DataFrame with user input
     input_df = pd.DataFrame({
         'Building Age': input_data['Building Age'],
@@ -137,8 +182,9 @@ async def predict(request: Request, input_data: dict = Body(...)):
         'Walls': input_data['Walls'],
         'Roof': input_data['Roof'],
         'Pillars': input_data['Pillars'],
-        'Flood Height bins': bin_flood_height(input_data['Flood Height'])
+        'Flood Height': input_data['Flood Height']
     }, index=[0])
+
     # Encode categorical columns in the input data
     encoded_data = damage_encoder.transform(input_df[categorical_cols])
     encoded_cols = damage_encoder.get_feature_names_out(categorical_cols)
@@ -148,7 +194,7 @@ async def predict(request: Request, input_data: dict = Body(...)):
     data_numerical = input_df.drop(columns=categorical_cols)
     data_final = pd.concat([encoded_data_df, data_numerical], axis=1)
 
-    predictions = damage_model.predict(data_final.values)
+    predictions = damage_model.predict(data_final)
 
     final_predictions = get_estimated_value_range(predictions[0])
     return {'predicted_class': final_predictions}
@@ -171,8 +217,9 @@ async def predict(request: Request, input_data: dict = Body(...)):
         'Walls': input_data['Walls'],
         'Roof': input_data['Roof'],
         'Pillars': input_data['Pillars'],
-        'Flood Height bins': bin_flood_height(flood_height)
+        'Flood Height': flood_height
     }, index=[0])
+
     # Encode categorical columns in the input data
     encoded_data = damage_encoder.transform(input_df[categorical_cols])
     encoded_cols = damage_encoder.get_feature_names_out(categorical_cols)
@@ -182,7 +229,7 @@ async def predict(request: Request, input_data: dict = Body(...)):
     data_numerical = input_df.drop(columns=categorical_cols)
     data_final = pd.concat([encoded_data_df, data_numerical], axis=1)
 
-    predictions = damage_model.predict(data_final.values)
+    predictions = damage_model.predict(data_final)
 
     final_predictions = get_estimated_value_range(predictions[0])
     return {'predicted_class': final_predictions}
