@@ -189,3 +189,18 @@ async def predict(request: Request, input_data: dict = Body(...)):
 
     final_predictions = get_estimated_value_range(predictions[0])
     return {'predicted_class': final_predictions}
+
+
+@app.post("/height/")
+async def height(request: Request, input_data: dict = Body(...)):
+    flood_map = get_pred2()
+    lat, lon = input_data['lat'], input_data['lon']
+    cordx, cordy = latlon_to_polar.transform(lat, lon)
+    x, y = transformer.rowcol(cordx, cordy)
+
+    # send bad request if the location is out of bounds
+    if x < 0 or y < 0 or x >= flood_map.shape[0] or y >= flood_map.shape[1]:
+        return Response(content="Location out of bounds", media_type="text/plain", status_code=400)
+    flood_height = flood_map[x, y]
+
+    return {'flood_height': flood_height}
