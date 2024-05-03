@@ -182,4 +182,4 @@ async def height(request: Request, input_data: dict = Body(...)):
         return Response(content="Location out of bounds", media_type="text/plain", status_code=400)
     flood_height = flood_map[x, y]
 
-    return {'flood_height': flood_height}
+    return {'flood_height': float(flood_height)}
