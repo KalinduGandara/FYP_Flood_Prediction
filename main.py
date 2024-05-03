@@ -1,15 +1,12 @@
-from typing import Union
 
 from fastapi import FastAPI, Response, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 
 import numpy as np
 import pandas as pd
-from scipy import ndimage
-from io import BytesIO
-from PIL import Image
+
 import rasterio as rio
-import matplotlib.pyplot as plt
+
 import joblib
 import pickle
 import pyproj
@@ -43,7 +40,7 @@ model = None
 
 damage_model = joblib.load('model/xg_model.joblib')
 damage_encoder = joblib.load('model/encoder.joblib')
-with open('map_model/transformer.pkl', 'rb') as f:
+with open('model/transformer.pkl', 'rb') as f:
     transformer = pickle.load(f)
 source_crs = 'epsg:4326'  # Global lat-lon coordinate system
 target_crs = 'epsg:5235'  # Coordinate system of the file
@@ -105,24 +102,6 @@ def read_root():
     image = get_pred2()
 
     return {"image": image.tolist(), "max_height": int(image.max())}
-
-
-@app.get("/image", response_class=Response)
-def get_image():
-    img_data = get_pred2()
-
-    fig, ax = plt.subplots()
-    ax.imshow(img_data)
-    ax.axis('off')
-    plt.tight_layout()
-
-    buffer = BytesIO()
-    plt.savefig(buffer, format='jpeg')
-    plt.close(fig)
-
-    image_bytes = buffer.getvalue()
-
-    return Response(content=image_bytes, media_type="image/jpeg")
 
 
 @app.post("/predict/")
