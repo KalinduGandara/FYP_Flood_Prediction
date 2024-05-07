@@ -4,23 +4,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import numpy as np
 import pandas as pd
+import tensorflow as tf
 
 import rasterio as rio
 
 import joblib
 import pickle
 import pyproj
-
-
-def load_model(name):
-    from tensorflow.keras.models import model_from_json
-
-    with open(name+'.json', 'r') as f:
-        model = model_from_json(f.read())
-
-    model.load_weights(name+'.h5')
-
-    return model
+import os
 
 
 app = FastAPI()
@@ -34,38 +25,29 @@ app.add_middleware(
 )
 categorical_cols = ['Walls', 'Roof', 'Pillars']
 
-model_name = "map_model/CNN_Model_2005"
-# model = load_model(model_name)
+model_name = "map_model\Flood_map_model.keras"
+model = tf.keras.models.load_model(model_name)
 model = None
 
 damage_model = joblib.load('model/xg_model.joblib')
 damage_encoder = joblib.load('model/encoder.joblib')
 with open('model/transformer.pkl', 'rb') as f:
     transformer = pickle.load(f)
+
+with open('model/scaler.pkl', 'rb') as f:
+    scaler = pickle.load(f)
+
+with open('model/profile_data.pkl', 'rb') as f:
+    profile = pickle.load(f)
 source_crs = 'epsg:4326'  # Global lat-lon coordinate system
 target_crs = 'epsg:5235'  # Coordinate system of the file
 latlon_to_polar = pyproj.Transformer.from_crs(source_crs, target_crs)
 
 
-def get_pred():
-    data = [-1.64682254, -1.11010161, -1.06129654, -1.1050725, -1.10742274,
-            -1.10469143, -1.10184463, -1.09881952, -1.09553624, -1.09196258,
-            -1.34811639, -1.4042805, -1.06090403, -1.05953386, -1.05719865,
-            -1.05473959, -1.05302812, -1.05292771, -1.26244903, -1.2782434,
-            -1.10653672, -1.11049255, -1.11185931, -1.11254004, -1.1157182,
-            -1.11330916, -1.26749804, -1.26498577]
-    x_test = np.array(data)
-    x_test = x_test.reshape(1, 1, 28)
+def get_pred_flie():
 
-    y_pred = model.predict(x_test)
-    y_pred.resize(600, 900)
-    y_pred[y_pred < 0.15] = 0
-
-    return y_pred
-
-
-def get_pred2():
-    filename = 'map_test.wd'
+    filename = 'map_gen.asc' if os.path.exists(
+        'map_gen.asc') else 'map_test.wd'
 
     with rio.open(filename) as real_data:
         img_data = real_data.read(1)
@@ -98,8 +80,7 @@ def bin_flood_height(height):
 
 @app.get("/")
 def read_root():
-    # image = get_pred()
-    image = get_pred2()
+    image = get_pred_flie()
 
     return {"image": image.tolist(), "max_height": int(image.max())}
 
@@ -134,7 +115,7 @@ async def predict(request: Request, input_data: dict = Body(...)):
 
 @app.post("/predict_loc/")
 async def predict(request: Request, input_data: dict = Body(...)):
-    flood_map = get_pred2()
+    flood_map = get_pred_flie()
     lat, lon = input_data['lat'], input_data['lon']
     cordx, cordy = latlon_to_polar.transform(lat, lon)
     x, y = transformer.rowcol(cordx, cordy)
@@ -172,7 +153,7 @@ async def predict(request: Request, input_data: dict = Body(...)):
 
 @app.post("/height/")
 async def height(request: Request, input_data: dict = Body(...)):
-    flood_map = get_pred2()
+    flood_map = get_pred_flie()
     lat, lon = input_data['lat'], input_data['lon']
     cordx, cordy = latlon_to_polar.transform(lat, lon)
     x, y = transformer.rowcol(cordx, cordy)
@@ -183,3 +164,29 @@ async def height(request: Request, input_data: dict = Body(...)):
     flood_height = flood_map[x, y]
 
     return {'flood_height': float(flood_height)}
+
+
+@app.post("/generate/")
+async def generate(request: Request, input_data: dict = Body(...)):
+    upstream1 = input_data['upstream1']
+    upstream2 = input_data['upstream2']
+    downstream1 = input_data['downstream1']
+    downstream2 = input_data['downstream2']
+
+    upstream_interpolate = np.linspace(upstream1, upstream2, num=9)
+    downstream_interpolate = np.linspace(downstream1, downstream2, num=9)
+    stream_data = [upstream_interpolate[0], downstream_interpolate[0]] + \
+        list(upstream_interpolate[1:])+list(downstream_interpolate[1:])
+    stream_df = pd.DataFrame([stream_data])
+
+    stream_scaled = scaler.transform(stream_df)
+    stream_scaled = stream_scaled.reshape(1, 1, 18)
+    pred = model.predict(stream_scaled)
+    pred.resize(600, 900)
+    pred[pred < 0.15] = 0
+    with rio.Env():
+        profile.update(dtype=str(pred.dtype), count=1, compress='lzw')
+        with rio.open("map_gen.asc", 'w', **profile) as dst:
+            dst.write(pred, 1)
+
+    return {"image": pred.tolist(), "max_height": int(pred.max())}
